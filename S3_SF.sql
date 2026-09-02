@@ -37,6 +37,8 @@ CREATE OR REPLACE TABLE contacts (
   postalcode STRING
 );
 
+select * from contacts;
+
 copy into contacts 
 from @my_public_stage/contacts1.csv
 file_format = 'my_pipe_format';
@@ -45,6 +47,13 @@ copy into contacts
 from @my_public_stage/contacts1.csv
 file_format = 'my_pipe_format'
 force=true;
+
+-- Validation Mode
+copy into contacts 
+from @my_public_stage/contacts1.csv
+file_format = 'my_pipe_format'
+validation_mode='RETURN_ERRORS';
+
 
 
 -- Validation Mode
