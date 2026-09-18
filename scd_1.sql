@@ -120,3 +120,85 @@ BEGIN
                 IS_CURRENT = FALSE
 
     WHEN NOT MATCHED THEN                        --- INSERTING NEW BRAND ROWS
+    INSERT (TGT.ID, TGT.NAME, TGT.ADDRESS, TGT.START_DATE, TGT.END_DATE, TGT.IS_CURRENT)
+    VALUES (SRC.ID, SRC.NAME, SRC.ADDRESS, CURRENT_DATE, TO_DATE('9999-12-31') , TRUE );
+
+    -- STEP 2
+    --- NEW VERSION OF EXISTING EXPIRED ROW 
+
+    INSERT INTO CUSTOMER_TARGET_SCD2
+    (ID,NAME,ADDRESS, START_DATE, END_DATE, IS_CURRENT)
+    SELECT S.ID,S.NAME,S.ADDRESS, CURRENT_DATE, TO_DATE('9999-12-31') , TRUE
+    FROM customer_stage_2 S
+    LEFT JOIN CUSTOMER_TARGET_SCD2 T ON S.ID = T.ID and T.IS_CURRENT = TRUE
+    where T.ID IS NULL 
+    ;
+
+    RETURN 'SCD2 merge completed at ' || CURRENT_TIMESTAMP()::STRING || ' Successful';
+
+END
+$$
+;
+
+-- Checking procedure 
+
+
+insert into customer_stage_2 values
+(5,'Priya','HYD');
+
+update customer_stage_2 set address = 'DELHI'
+where id=2;
+
+select * from customer_target_scd2 order by 1;
+
+
+CALL SP_CUSTOMER_TARGET_SCD2();
+
+
+CREATE OR REPLACE TASK TASK_CUSTOMER_SCD2
+    WAREHOUSE = COMPUTE_WH
+    SCHEDULE = '5 MINUTE'
+   
+AS
+CALL SP_CUSTOMER_TARGET_SCD2();
+
+
+ALTER TASK TASK_CUSTOMER_SCD2 RESUME;
+
+
+-- checking tasks
+
+delete from customer_stage_2 where  id=6;
+
+
+insert into customer_stage_2 values
+(6,'Mishra','HYD');
+
+update customer_stage_2 set address = 'HYD'
+where id=4;
+
+SHOW TASKS LIKE 'TASK_CUSTOMER_SCD2';
+
+SELECT *
+FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY())
+WHERE NAME = 'TASK_CUSTOMER_SCD2'
+ORDER BY SCHEDULED_TIME DESC;
+
+ALTER TASK TASK_CUSTOMER_SCD2 SUSPEND;
+
+select current_timestamp;
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
