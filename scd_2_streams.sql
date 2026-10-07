@@ -1,3 +1,25 @@
+3 types 
+1.standard -- upsert logic, delete
+2.append only -- insert only 
+3.insert only -- external table 
+
+-------------------------------------------------
+
+micro patition 1m rows -- micro parition immutable , create a another vesion 
+
+table 100 rows, yesterday, 
+
+create stream
+
+today, 10 rows
+
+streams holds 10 rows information tilll we consume ( insert, update , delete )
+
+metadata$action  - insert, delete
+metadata$isupdate  -- True/FALSE
+metadata$row_id  -- unique
+;
+
 CREATE OR REPLACE TABLE employee_source (
     employee_id     NUMBER,
     full_name       VARCHAR(100),
@@ -17,7 +39,7 @@ VALUES
     (106, 'Sara Khan', 'Engineering', 'Engineering Manager', NULL, 140000.00);
 
 
--- changes
+-- 1st time changes
 INSERT INTO employee_source (employee_id, full_name, department, role, manager_id, salary)
 VALUES
     (107, 'Naga', 'Engineering', 'Engineering Manager', 1054, 140000.00);
@@ -38,7 +60,7 @@ VALUES
     (108, 'Abdul', 'Engineering', 'Engineering Manager', 105, 200000.00);
     
 UPDATE employee_source
-SET salary = 200000.00
+SET salary = 200001.00
 WHERE employee_id = 106;
 
 
@@ -75,8 +97,33 @@ Create or replace stream employee_source_stream on table employee_source;
 
 select * from employee_source_stream;
 
+SELECT SYSTEM$STREAM_HAS_DATA('employee_source_stream');
+
 select * from dim_employee_scd2;
+
 select * from dim_employee_scd2 where is_current='TRUE' order by 2;
+
+-- Statement 1: MERGE — expire current rows and insert brand new rows
+    MERGE INTO dim_employee_scd2 AS T
+    USING employee_source_stream AS S
+        ON T.employee_id = S.employee_id AND T.is_current = 'TRUE'
+    WHEN MATCHED AND S.metadata$action = 'DELETE' AND S.metadata$isupdate = TRUE   -- Update 
+    THEN UPDATE
+        SET T.end_date   = CURRENT_DATE(),
+            T.is_current = 'FALSE'
+    WHEN NOT MATCHED AND S.metadata$action = 'INSERT' AND S.metadata$isupdate = FALSE   -- Brand New
+    THEN INSERT (employee_id, full_name, department, role, manager_id, salary, start_date, end_date, is_current)
+    VALUES (S.employee_id, S.full_name, S.department, S.role, S.manager_id, S.salary,
+            CURRENT_DATE(), '9999-12-31', 'TRUE');
+
+    -- Statement 2: INSERT new version of updated rows as new rows  -- new version of updated rows 
+    INSERT INTO dim_employee_scd2 (employee_id, full_name, department, role, manager_id, salary, start_date, end_date, is_current)
+    SELECT S.employee_id, S.full_name, S.department, S.role, S.manager_id, S.salary,
+           CURRENT_DATE(), '9999-12-31', 'TRUE'
+    FROM employee_source_stream S
+    WHERE S.metadata$action = 'INSERT' AND S.metadata$isupdate = TRUE;
+
+
 
 
 
@@ -116,16 +163,22 @@ END;
 $$;
 
 
+CALL sp_apply_employee_scd2();
+
+
 
 CREATE OR REPLACE TASK task_employee_scd2
     WAREHOUSE = COMPUTE_WH
     SCHEDULE = '1 MINUTE'
     WHEN SYSTEM$STREAM_HAS_DATA('employee_source_stream')
-AS
-CALL sp_apply_employee_scd2();
+AS CALL sp_apply_employee_scd2();
 
+
+select * from dim_employee_scd2 where is_current='TRUE' order by 2;
 
 ALTER TASK task_employee_scd2 RESUME;
+
+ALTER TASK task_employee_scd2 SUSPEND;
 
 
 EXECUTE TASK task_employee_scd2;  -- manually force 
