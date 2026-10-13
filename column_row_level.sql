@@ -55,6 +55,8 @@ create or replace table customers (
     created_at         timestamp_ntz default current_timestamp()
 );
 
+--PII
+
 insert into customers
     (customer_id, full_name, email, phone, ssn, date_of_birth, salary, region, marketing_consent)
 values
@@ -70,6 +72,8 @@ values
 -- A second table, used later for tag-based masking.
 -- (Created BEFORE any policy exists so it holds the real values.)
 create or replace table customers_archive as select * from customers;
+
+-- CTAS
 
 
 /* ---------------------------------------------------------------------
@@ -90,9 +94,12 @@ grant usage on schema DYNAMIC_MASK.MASKING_DEMO  to role analyst_role;
 grant select on all tables    in schema DYNAMIC_MASK.MASKING_DEMO to role pii_admin;
 grant select on all tables    in schema DYNAMIC_MASK.MASKING_DEMO to role support_role;
 grant select on all tables    in schema DYNAMIC_MASK.MASKING_DEMO to role analyst_role;
+
 grant select on future tables in schema DYNAMIC_MASK.MASKING_DEMO to role pii_admin;
 grant select on future tables in schema DYNAMIC_MASK.MASKING_DEMO to role support_role;
 grant select on future tables in schema DYNAMIC_MASK.MASKING_DEMO to role analyst_role;
+
+-- DBT , prehook -- use WAREHOUSE COMPUTE_wh, TRUNCATE TABLE  ,  .POSTHOOK -- GRANT QUERY 
 
 grant role pii_admin    to user identifier($my_user);
 grant role support_role to user identifier($my_user);
@@ -107,6 +114,10 @@ grant role analyst_role to user identifier($my_user);
    --------------------------------------------------------------------- */
 use role accountadmin;
 use schema DYNAMIC_MASK.MASKING_DEMO;
+
+-- 1ST CREATE A POLICY , THEN ASSING IT TO A COLUMN IN A TABLE 
+
+SELECT EMAIL FROM customers;
 
 -- EMAIL: admin = full, support = hide the name but keep the domain, others = fully masked
 create or replace masking policy mask_email as (val string) returns string ->
@@ -192,8 +203,12 @@ select customer_id, email, ssn, salary from customers order by customer_id;
    6. INSPECT WHERE POLICIES ARE USED
    --------------------------------------------------------------------- */
 use role accountadmin;
+
 show masking policies in schema DYNAMIC_MASK.MASKING_DEMO;
+
 describe masking policy mask_email;
+
+
 
 select policy_name, ref_column_name, policy_status
 from table(DYNAMIC_MASK.information_schema.policy_references(
@@ -241,6 +256,8 @@ create or replace masking policy mask_email_consent
         else '*****@*****.com'
     end;
 
+    SELECT * FROM CUSTOMERS;
+
 -- FORCE swaps the policy on a column in one step (no unset needed)
 alter table customers modify column email
     set masking policy mask_email_consent using (email, marketing_consent) force;
@@ -258,6 +275,8 @@ alter table customers modify column email set masking policy mask_email force;
       Tag a column once and it is masked automatically.
       Scales far better than attaching policies column by column.
    --------------------------------------------------------------------- */
+-- dbt 
+   
 create or replace tag pii_email_tag comment = 'Columns that contain email addresses';
 
 -- Attach the policy to the TAG (one policy per data type per tag)
@@ -282,7 +301,7 @@ select count(*) from customers where email = 'alice.johnson@gmail.com';   -- 0
 
 -- (b) CTAS copies the masked values, so masking can't be bypassed this way
 --     (give analysts a schema they can write to if you want to try it)
--- create table my_copy as select * from customers;
+create table my_copy as select * from customers;
 
 -- (c) Aggregates on a NULL-masked column: SUM(salary) is NULL, AVG ignores NULLs
 select sum(salary) as total_salary, count(salary) as visible_salaries from customers;
@@ -294,7 +313,14 @@ use role accountadmin;
 
 -- (e) A masking policy that is still attached cannot be dropped. Unset it first:
 alter table customers modify column salary unset masking policy;
+-- WILLL EXPLAIN IN B H P project , tag based data masking 
 
+select * from customers;
+
+
+create table t2 ( id int , name varchar(10), table varchar(10));
+
+--dda94-fb45cd7-a55ec41-311978c
 
 /* ---------------------------------------------------------------------
 --  ROW ACCESS POLICY (row-level security, the sibling of masking)
@@ -305,6 +331,9 @@ insert into region_access values
     ('ANALYST_ROLE', 'US'),
     ('SUPPORT_ROLE', 'EU'),
     ('SUPPORT_ROLE', 'APAC');
+
+select * from region_access;
+select * from customers;
 
 create or replace row access policy region_rap as (row_region string) returns boolean ->
     is_role_in_session('PII_ADMIN')
@@ -332,7 +361,7 @@ alter table customers drop row access policy region_rap;
 /* ---------------------------------------------------------------------
    12. CLEANUP (uncomment to reset the demo)
    --------------------------------------------------------------------- */
--- You can uncomment them by CTRL + /
+-- -- You can uncomment them by CTRL + /
 
 -- use role accountadmin;
 -- alter tag pii_email_tag unset masking policy mask_email;
